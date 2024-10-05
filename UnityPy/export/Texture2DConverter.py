@@ -1,23 +1,38 @@
-﻿import texture2ddecoder
-import etcpak
-from PIL import Image
+﻿from __future__ import annotations
+
+import struct
 from copy import copy
 from io import BytesIO
-import struct
-from ..enums import TextureFormat, BuildTarget
+from typing import TYPE_CHECKING, Tuple, Union
+
+import texture2ddecoder
+from PIL import Image
+
+from ..enums import BuildTarget, TextureFormat
 from ..helpers import TextureSwizzler
+
+if TYPE_CHECKING:
+    from ..classes import Texture2D
+
 
 TF = TextureFormat
 
 
-def image_to_texture2d(img: Image.Image, target_texture_format: TF, flip: bool = True):
+def image_to_texture2d(
+    img: Image.Image, target_texture_format: Union[TF, int], flip: bool = True
+) -> Tuple[bytes, TextureFormat]:
+    if isinstance(target_texture_format, int):
+        target_texture_format = TextureFormat(target_texture_format)
+
+    import etcpak
+
     if flip:
         img = img.transpose(Image.FLIP_TOP_BOTTOM)
 
     # DXT
     if target_texture_format in [TF.DXT1, TF.DXT1Crunched]:
         raw_img = img.convert("RGBA").tobytes()
-        enc_img = etcpak.compress_to_dxt1(raw_img, img.width, img.height)
+        enc_img = etcpak.compress_bc1(raw_img, img.width, img.height)
         tex_format = TF.DXT1
     elif target_texture_format in [TF.DXT5, TF.DXT5Crunched]:
         raw_img = img.convert("RGBA").tobytes()
@@ -80,7 +95,7 @@ def image_to_texture2d(img: Image.Image, target_texture_format: TF, flip: bool =
     return enc_img, tex_format
 
 
-def assert_rgba(img: Image.Image, target_texture_format: TextureFormat):
+def assert_rgba(img: Image.Image, target_texture_format: TextureFormat) -> Image.Image:
     if img.mode == "RGB":
         img = img.convert("RGBA")
     assert (
@@ -90,8 +105,8 @@ def assert_rgba(img: Image.Image, target_texture_format: TextureFormat):
 
 
 def get_image_from_texture2d(
-    texture_2d: "Texture2D",
-    flip=True,
+    texture_2d: Texture2D,
+    flip: bool = True,
 ) -> Image.Image:
     """converts the given texture into PIL.Image
 
@@ -103,12 +118,12 @@ def get_image_from_texture2d(
     :rtype: Image
     """
     return parse_image_data(
-        texture_2d.image_data,
+        texture_2d.get_image_data(),
         texture_2d.m_Width,
         texture_2d.m_Height,
         texture_2d.m_TextureFormat,
-        texture_2d.version,
-        texture_2d.platform,
+        texture_2d.object_reader.version,
+        texture_2d.object_reader.platform,
         getattr(texture_2d, "m_PlatformBlob", None),
         flip,
     )
@@ -118,11 +133,11 @@ def parse_image_data(
     image_data: bytes,
     width: int,
     height: int,
-    texture_format: TextureFormat,
+    texture_format: Union[int, TextureFormat],
     version: tuple,
     platform: int,
     platform_blob: bytes = None,
-    flip=True,
+    flip: bool = True,
 ) -> Image.Image:
     image_data = copy(bytes(image_data))
     if not image_data:
@@ -138,6 +153,8 @@ def parse_image_data(
     if texture_format in XBOX_SWAP_FORMATS:
         image_data = swap_bytes_for_xbox(image_data, platform)
 
+    if not isinstance(texture_format, TextureFormat):
+        texture_format = TextureFormat(texture_format)
     if "Crunched" in texture_format.name:
         version = version
         if (
@@ -216,12 +233,12 @@ def astc(image_data: bytes, width: int, height: int, block_size: tuple) -> Image
     return Image.frombytes("RGBA", (width, height), image_data, "raw", "BGRA")
 
 
-def pvrtc(image_data: bytes, width: int, height: int, fmt: bool):
+def pvrtc(image_data: bytes, width: int, height: int, fmt: bool) -> Image.Image:
     image_data = texture2ddecoder.decode_pvrtc(image_data, width, height, fmt)
     return Image.frombytes("RGBA", (width, height), image_data, "raw", "BGRA")
 
 
-def etc(image_data: bytes, width: int, height: int, fmt: list):
+def etc(image_data: bytes, width: int, height: int, fmt: list) -> Image.Image:
     if fmt[0] == 1:
         image_data = texture2ddecoder.decode_etc1(image_data, width, height)
     elif fmt[0] == 2:
@@ -236,7 +253,7 @@ def etc(image_data: bytes, width: int, height: int, fmt: list):
     return Image.frombytes("RGBA", (width, height), image_data, "raw", "BGRA")
 
 
-def eac(image_data: bytes, width: int, height: int, fmt: list):
+def eac(image_data: bytes, width: int, height: int, fmt: list) -> Image.Image:
     if fmt == "EAC_R":
         image_data = texture2ddecoder.decode_eacr(image_data, width, height)
     elif fmt == "EAC_R_SIGNED":
@@ -292,7 +309,7 @@ def rg(
         return pillow(rgb_data, width, height, mode, codec.replace("RG", "RGB"), args)
 
 
-def rgb9e5float(image_data: bytes, width: int, height: int):
+def rgb9e5float(image_data: bytes, width: int, height: int) -> Image.Image:
     rgb = bytearray(width * height * 3)
     for i, (n,) in enumerate(struct.iter_unpack("<i", image_data)):
         scale = n >> 27 & 0x1F

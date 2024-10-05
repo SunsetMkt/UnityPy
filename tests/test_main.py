@@ -1,7 +1,9 @@
+import io
 import os
 
-import UnityPy
 from PIL import Image
+
+import UnityPy
 
 SAMPLES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
 
@@ -19,13 +21,33 @@ def test_read_batch():
         obj.read()
 
 
+def test_save_dict():
+    env = UnityPy.load(SAMPLES)
+    for obj in env.objects:
+        data = obj.get_raw_data()
+        item = obj.read_typetree(wrap=False)
+        assert isinstance(item, dict)
+        re_data = obj.save_typetree(item)
+        assert data == re_data
+
+
+def test_save_wrap():
+    env = UnityPy.load(SAMPLES)
+    for obj in env.objects:
+        data = obj.get_raw_data()
+        item = obj.read_typetree(wrap=True)
+        assert not isinstance(item, dict)
+        re_data = obj.save_typetree(item)
+        assert data == re_data
+
+
 def test_texture2d():
     for f in os.listdir(SAMPLES):
         env = UnityPy.load(os.path.join(SAMPLES, f))
         for obj in env.objects:
             if obj.type.name == "Texture2D":
                 data = obj.read()
-                data.image.save("test.png")
+                data.image.save(io.BytesIO(), format="PNG")
                 data.image = data.image.transpose(Image.ROTATE_90)
                 data.save()
 
@@ -35,14 +57,16 @@ def test_sprite():
         env = UnityPy.load(os.path.join(SAMPLES, f))
         for obj in env.objects:
             if obj.type.name == "Sprite":
-                obj.read().image.save("test.png")
+                obj.read().image.save(io.BytesIO(), format="PNG")
 
 
 def test_audioclip():
     # as not platforms are supported by FMOD
     # we have to check if the platform is supported first
     try:
-        UnityPy.export.AudioClipConverter.import_pyfmodex()
+        from UnityPy.export import AudioClipConverter
+
+        AudioClipConverter.import_pyfmodex()
     except NotImplementedError:
         return
     except OSError:
@@ -51,7 +75,7 @@ def test_audioclip():
         print("Failed to load the fmod lib for your system.")
         print("Skipping the audioclip test.")
         return
-    if UnityPy.export.AudioClipConverter.pyfmodex is False:
+    if AudioClipConverter.pyfmodex is False:
         return
     env = UnityPy.load(os.path.join(SAMPLES, "char_118_yuki.ab"))
     for obj in env.objects:
